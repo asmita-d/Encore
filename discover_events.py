@@ -17,6 +17,22 @@ RESULT_LIMIT = 20
 REQUEST_TIMEOUT = 15
 
 
+class DiscoveryRequestError(RuntimeError):
+    """Diagnostics built only from fixed labels and a validated numeric status."""
+
+    def __init__(self, category, status_code=None):
+        messages = {
+            "http": "Ticketmaster HTTP request failed",
+            "timeout": "Ticketmaster request timed out",
+            "connection": "Ticketmaster connection failed",
+            "request": "Ticketmaster request failed",
+        }
+        message = messages.get(category, messages["request"])
+        if category == "http" and type(status_code) is int and 100 <= status_code <= 599:
+            message += f" (HTTP {status_code})"
+        super().__init__(message + ".")
+
+
 def get_api_key():
     """Load the project .env without overriding an existing environment value."""
     load_dotenv(Path(__file__).resolve().parent / ".env")
@@ -37,9 +53,16 @@ def request_items(url, params, item_type):
         response = requests.get(url, params=params, timeout=REQUEST_TIMEOUT)
         response.raise_for_status()
         data = response.json()
+    except requests.Timeout:
+        raise DiscoveryRequestError("timeout") from None
+    except requests.ConnectionError:
+        raise DiscoveryRequestError("connection") from None
+    except requests.HTTPError as error:
+        status = error.response.status_code if error.response is not None else None
+        raise DiscoveryRequestError("http", status) from None
     except requests.RequestException:
         # Exception messages can contain the request URL and its API key.
-        raise RuntimeError("Ticketmaster HTTP request failed. Check connectivity and API access.") from None
+        raise DiscoveryRequestError("request") from None
     except ValueError:
         raise RuntimeError("Ticketmaster returned invalid JSON.") from None
 

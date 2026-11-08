@@ -134,10 +134,13 @@ class EncoreService:
                                     "message": "No exact-name attraction on the first page"})
                     continue
                 listings = discovery.search_events(attraction["id"], api_key, started)
-            except RuntimeError:
-                # Do not expose provider exception strings or credentials in JSON.
+            except RuntimeError as error:
+                # Only our typed, sanitized request diagnostics may cross this
+                # boundary. Arbitrary exception strings can contain credentials.
+                message = (str(error) if isinstance(error, discovery.DiscoveryRequestError)
+                           else "Ticketmaster discovery failed")
                 details.append({"artist": artist["name"], "status": "error",
-                                "message": "Ticketmaster discovery failed; previous listings retained"})
+                                "message": message + "; previous listings retained"})
                 continue
             counts["discovered"] += len(listings)
             with connect(self.database) as db:
