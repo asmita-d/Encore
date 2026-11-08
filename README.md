@@ -1,11 +1,109 @@
 # Encore: Ticketmaster discovery proof of concept
 
-Encore also includes a small local FastAPI backend using Python's built-in
-SQLite driver. The CLI commands below remain unchanged.
+Encore uses a shared Python service with SQLite. Streamlit can run by itself or
+connect to the local FastAPI backend. The CLI commands below remain unchanged.
+
+## Single-process local testing
+
+Use the existing virtual environment and dependencies. No FastAPI server is
+needed in this mode:
+
+```powershell
+cd C:\encore
+$env:ENCORE_MODE = 'local'
+$env:ENCORE_DEMO = 'false'
+.\.venv\Scripts\python.exe -m streamlit run streamlit_app.py --server.address 127.0.0.1 --server.port 8501
+```
+
+Open `http://127.0.0.1:8501`. Add/remove artists, select **Refresh Events** to
+fetch Ticketmaster listings, then **Generate Digest** and **Download Markdown**.
+Normal local mode keeps using `encore.db` (or `DATABASE_URL`) across restarts,
+without seeding a watchlist. Refresh reads `TICKETMASTER_API_KEY` from the
+environment or Streamlit secrets; local mode also retains the existing `.env`
+fallback. A missing key produces a safe refresh message; startup, CRUD, saved
+listings and digest generation still work. Gemini is never required by the app.
+
+To test the cloud demo locally in a separate database:
+
+```powershell
+$env:ENCORE_MODE = 'local'
+$env:ENCORE_DEMO = 'true'
+$env:DATABASE_URL = 'sqlite:///data/demo.sqlite3'
+$env:ENCORE_SEED_ARTISTS = 'Coldplay,Dua Lipa'
+.\.venv\Scripts\python.exe -m streamlit run streamlit_app.py
+```
+
+The first startup seeds only an empty watchlist. A database marker prevents
+later reruns or restarts from restoring artists you intentionally removed.
+Existing nonempty watchlists are left alone. The seed accepts a comma-separated
+environment string or a list in Streamlit secrets. Only names are seeded;
+events are fetched when you select **Refresh Events**, never at startup.
+
+After demo testing, restore normal local settings:
+
+```powershell
+$env:ENCORE_DEMO = 'false'
+Remove-Item Env:DATABASE_URL -ErrorAction SilentlyContinue
+```
+
+Run the complete offline suite, including the mocked Streamlit demo test:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+.\.venv\Scripts\python.exe -m py_compile streamlit_app.py frontend.py backend/main.py backend/service.py backend/database.py discover_events.py digest.py
+```
+
+Tests use temporary databases and mocked providers. They do not run the live
+root-level `test_gemini_search.py` script.
+
+## Free deployment on Streamlit Community Cloud
+
+This is a single-user demo with a shared editable watchlist, not separate
+accounts. All visitors see and can change the same data. Cloud SQLite is
+temporary: watchlist edits and saved events may reset after restarts, reboots
+or redeploys. The interface displays this warning. Download Markdown digests
+to retain copies. There is no claim of permanent cloud persistence.
+
+1. When you are ready, put the project source and `requirements.txt` in a GitHub
+   repository. Include `backend/`, `digest.py`, `discover_events.py`,
+   `llm_analyzer.py`, `frontend.py` and `streamlit_app.py`. Do not upload `.env`,
+   `.streamlit/secrets.toml`, virtual environments or SQLite files. These are
+   excluded by `.gitignore`.
+2. Sign in at `https://share.streamlit.io`, choose **Create app**, and select
+   your repository and branch. Set the entrypoint/main file path to
+   **`streamlit_app.py`** at the repository root.
+3. Open **Advanced settings**, choose Python **3.12**, and paste the following
+   TOML into the dashboard's **Secrets** field, replacing only the placeholder
+   key with your Ticketmaster key:
+
+   ```toml
+   ENCORE_MODE = "local"
+   ENCORE_DEMO = true
+   ENCORE_SEED_ARTISTS = ["Coldplay", "Dua Lipa"]
+   TICKETMASTER_API_KEY = "replace-with-your-ticketmaster-key"
+   ```
+
+4. Save the settings and select **Deploy**. Community Cloud installs
+   `requirements.txt` and starts Streamlit; no second server or FastAPI URL is
+   needed. Leave `DATABASE_URL` unset to use the demo's temporary SQLite file.
+5. Check the demo warning and seeded artists, select **Refresh Events**, then
+   generate and download a digest. No listings is a valid result. Missing keys
+   are reported on refresh without blocking the rest of the app.
+
+You can change secrets later in the app's dashboard settings. For local secrets
+testing, the same TOML can go into `.streamlit/secrets.toml`, which is ignored;
+never commit it. Environment settings take precedence over Streamlit secrets.
+Do not set `GEMINI_API_KEY` for this app; the deterministic digest needs none.
+No extra paid service or database is used. Provider requests remain bounded by
+the existing discovery limits and your Ticketmaster account quota.
+
+See the official [deployment instructions](https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/deploy)
+and [dashboard secrets instructions](https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/secrets-management).
 
 ## Streamlit interface
 
-The local single-user frontend uses FastAPI over HTTP; it never opens SQLite.
+The default `ENCORE_MODE=http` uses FastAPI over HTTP. Both modes use the same
+service logic; HTTP mode leaves storage access to the server.
 Install dependencies once, if needed:
 
 ```powershell
@@ -24,17 +122,18 @@ Terminal 2 — start Streamlit:
 
 ```powershell
 cd C:\encore
+$env:ENCORE_MODE = 'http'
 .\.venv\Scripts\python.exe -m streamlit run streamlit_app.py --server.address 127.0.0.1 --server.port 8501
 ```
 
 Open `http://127.0.0.1:8501`. To use another backend, set
 `$env:ENCORE_API_URL = 'http://127.0.0.1:8000'` in Terminal 2 before starting
-Streamlit. This environment variable defaults to that address; the frontend does
-not read or modify `.env`. Provider credentials belong to the backend only.
+Streamlit. This environment variable defaults to that address. In HTTP mode,
+provider credentials belong to the backend only. No mode modifies `.env`.
 
 Add artists to the watchlist, then select **Refresh Events**. Only this button
 calls provider discovery; ordinary reruns and **Reload saved data** read saved
-API data. Removal requires a confirmation checkbox. Refresh results include
+data through the selected mode. Removal requires a confirmation checkbox. Refresh results include
 per-artist failures and no-match messages; saved listings survive failed refreshes.
 A timeout may leave the backend processing: reload saved data and inspect the
 last refresh before retrying. No Gemini calls are made by the frontend.

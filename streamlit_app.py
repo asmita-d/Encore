@@ -1,9 +1,8 @@
-"""Encore's local single-user interface. All storage is owned by FastAPI."""
+"""Encore's single-user interface, with HTTP and in-process service modes."""
 
 import streamlit as st
 
-from frontend import APIError, EncoreAPI, event_bucket, source_url, unique_listings
-from digest import build_digest, render_markdown
+from frontend import APIError, create_client, event_bucket, source_url, unique_listings
 
 
 st.set_page_config(page_title="Encore · Your next live moment", page_icon="🎵", layout="wide")
@@ -15,7 +14,16 @@ div[data-testid="stForm"] {border-radius: 14px;}
 .encore-kicker {color: #a78bfa; font-weight: 700; letter-spacing: .18em; font-size: .8rem;}
 </style>""", unsafe_allow_html=True)
 
-api = EncoreAPI()
+try:
+    # Missing local secrets files are normal; never display their contents/errors.
+    try:
+        secrets = dict(st.secrets)
+    except FileNotFoundError:
+        secrets = {}
+    api = create_client(secrets)
+except APIError as error:
+    st.error(str(error))
+    st.stop()
 
 
 def refresh_result(result):
@@ -35,8 +43,11 @@ with st.sidebar:
     st.caption("Your personal live music watchlist")
     st.code(api.url, language=None)
     st.button("Reload saved data", use_container_width=True,
-              help="Read saved data from FastAPI. This does not contact Ticketmaster.")
-    st.caption("Set ENCORE_API_URL in the Streamlit terminal to use another backend.")
+              help="Read saved data. This does not contact Ticketmaster.")
+    if not api.local:
+        st.caption("Set ENCORE_API_URL in the Streamlit terminal to use another backend.")
+    if api.demo:
+        st.warning("Single-user cloud demo: watchlist and event changes may reset after restarts or redeploys. All visitors share this demo's data. Download digests to keep a copy.")
 
 st.markdown('<div class="encore-kicker">KEEP YOUR FAVORITES CLOSE</div>', unsafe_allow_html=True)
 st.title("Encore")
@@ -53,8 +64,9 @@ try:
     artists = api.request("GET", "/artists")
 except APIError as error:
     st.error(str(error))
-    st.code("python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000", language="powershell")
-    st.caption("After starting the API, select Reload saved data in the sidebar.")
+    if not api.local:
+        st.code("python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000", language="powershell")
+    st.caption("Check your configuration, then select Reload saved data in the sidebar.")
     st.stop()
 
 events = None
@@ -129,8 +141,11 @@ if events is None:
 st.header("Weekly Digest")
 st.caption("Create a free Markdown newsletter from all saved artists and listings, independent of the filters below. No provider or Gemini requests are made.")
 if st.button("Generate Digest"):
-    digest = build_digest(events, artists)
-    st.session_state.weekly_digest = (digest["generated_on"], render_markdown(digest))
+    try:
+        digest, markdown = api.digest(events, artists)
+        st.session_state.weekly_digest = (digest["generated_on"], markdown)
+    except APIError as error:
+        st.error(str(error))
 if "weekly_digest" in st.session_state:
     generated_on, markdown = st.session_state.weekly_digest
     st.caption(f"Snapshot generated on {generated_on}. Select Generate Digest again to use current saved data.")
