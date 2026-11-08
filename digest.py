@@ -73,10 +73,12 @@ def build_digest(records, saved_artists, reference_date=None):
         items = sorted(sections[artist], key=lambda e: (e["date"], str(e["time"]), str(e["title"])))
         artists.append({"artist": artist, "events": items})
     count = sum(len(section["events"]) for section in artists)
+    item_word = "item" if count == 1 else "items"
+    artist_word = "artist" if len(artists) == 1 else "artists"
     return {"generated_on": start.isoformat(), "start_date": start.isoformat(),
             "end_date": end.isoformat(), "artists": artists,
-            "introduction": f"This week's saved provider listings include {count} display items "
-                            f"across {len(artists)} artists. These are provider listings, not verified "
+            "introduction": f"This week's saved provider listings include {count} display {item_word} "
+                            f"across {len(artists)} {artist_word}. These are provider listings, not verified "
                             "artist appearances. Check original sources for lineups and current status."}
 
 

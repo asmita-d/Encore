@@ -78,6 +78,30 @@ class DigestTests(unittest.TestCase):
                       "not verified artist appearances"):
             self.assertIn(value, text)
 
+    def test_introduction_singular_counts_after_duplicate_grouping(self):
+        records = [listing(), listing("two")]
+        original = copy.deepcopy(records)
+        digest = self.build(records)
+        expected = "This week's saved provider listings include 1 display item across 1 artist."
+        self.assertTrue(digest["introduction"].startswith(expected))
+        self.assertIn(expected, render_markdown(digest))
+        self.assertEqual(digest["artists"][0]["events"][0]["sources"], original)
+        self.assertEqual(records, original)
+
+    def test_introduction_plural_counts(self):
+        cases = [
+            ([], ("Artist A",), "0 display items across 0 artists."),
+            ([listing(), listing("two", title="Other listing")],
+             ("Artist A",), "2 display items across 1 artist."),
+            ([listing(), listing("two", artist="Artist B"), listing("three", artist="Artist C")],
+             ("Artist A", "Artist B", "Artist C"), "3 display items across 3 artists."),
+        ]
+        for records, artists, expected in cases:
+            with self.subTest(expected=expected):
+                digest = self.build(records, artists)
+                self.assertIn(expected, digest["introduction"])
+                self.assertIn(expected, render_markdown(digest))
+
     def test_untrusted_markdown_and_urls(self):
         text = render_markdown(self.build([listing(title="<script>bad</script> [click]",
                                                    url="javascript:alert(1)")]))
